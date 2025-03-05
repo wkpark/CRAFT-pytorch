@@ -47,7 +47,7 @@ parser.add_argument('--trained_model', default='weights/craft_mlt_25k.pth', type
 parser.add_argument('--text_threshold', default=0.7, type=float, help='text confidence threshold')
 parser.add_argument('--low_text', default=0.4, type=float, help='text low-bound score')
 parser.add_argument('--link_threshold', default=0.4, type=float, help='link confidence threshold')
-parser.add_argument('--cuda', default=True, type=str2bool, help='Use cuda for inference')
+parser.add_argument('--gpu', default=False, action='store_true', help='Use GPU for inference')
 parser.add_argument('--canvas_size', default=1280, type=int, help='image size for inference')
 parser.add_argument('--mag_ratio', default=1.5, type=float, help='image magnification ratio')
 parser.add_argument('--poly', default=False, action='store_true', help='enable polygon type')
@@ -66,7 +66,7 @@ result_folder = './result/'
 if not os.path.isdir(result_folder):
     os.mkdir(result_folder)
 
-def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, refine_net=None):
+def test_net(net, image, text_threshold, link_threshold, low_text, device, poly, refine_net=None):
     t0 = time.time()
 
     # resize
@@ -77,12 +77,13 @@ def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, r
     x = imgproc.normalizeMeanVariance(img_resized)
     x = torch.from_numpy(x).permute(2, 0, 1)    # [h, w, c] to [c, h, w]
     x = Variable(x.unsqueeze(0))                # [c, h, w] to [b, c, h, w]
-    if cuda:
-        x = x.cuda()
+    x = x.to(device)
 
     # forward pass
     with torch.no_grad():
         y, feature = net(x)
+
+    del x
 
     # make score and link map
     score_text = y[0,:,:,0].cpu().data.numpy()
@@ -98,7 +99,7 @@ def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, r
     t1 = time.time()
 
     # Post-processing
-    boxes, polys = craft_utils.getDetBoxes(score_text, score_link, text_threshold, link_threshold, low_text, poly)
+    boxes, polys, mapper = craft_utils.getDetBoxes(score_text, score_link, text_threshold, link_threshold, low_text, poly)
 
     # coordinate adjustment
     boxes = craft_utils.adjustResultCoordinates(boxes, ratio_w, ratio_h)
@@ -124,13 +125,23 @@ if __name__ == '__main__':
     net = CRAFT()     # initialize
 
     print('Loading weights from checkpoint (' + args.trained_model + ')')
-    if args.cuda:
-        net.load_state_dict(copyStateDict(torch.load(args.trained_model)))
+    if args.gpu:
+        if torch.cuda.is_available():
+            device = 'cuda'
+        elif torch.backends.mps.is_available():
+            device = 'mps'
+        else:
+            device = 'cpu'
+            print('Neither CUDA nor MPS are available - defaulting to CPU. Note: This module is much faster with a GPU.')
     else:
-        net.load_state_dict(copyStateDict(torch.load(args.trained_model, map_location='cpu')))
+        device = 'cpu'
+        print('use CPU.')
 
-    if args.cuda:
-        net = net.cuda()
+    net.load_state_dict(copyStateDict(torch.load(args.trained_model, map_location=device, weights_only=False)))
+
+
+    if device != 'cpu':
+        net = net.to(device)
         net = torch.nn.DataParallel(net)
         cudnn.benchmark = False
 
@@ -142,12 +153,9 @@ if __name__ == '__main__':
         from refinenet import RefineNet
         refine_net = RefineNet()
         print('Loading weights of refiner from checkpoint (' + args.refiner_model + ')')
-        if args.cuda:
-            refine_net.load_state_dict(copyStateDict(torch.load(args.refiner_model)))
-            refine_net = refine_net.cuda()
+        refine_net.load_state_dict(copyStateDict(torch.load(args.refiner_model, map_location=device, weights_only=False)))
+        if device != 'cpu':
             refine_net = torch.nn.DataParallel(refine_net)
-        else:
-            refine_net.load_state_dict(copyStateDict(torch.load(args.refiner_model, map_location='cpu')))
 
         refine_net.eval()
         args.poly = True
@@ -159,7 +167,7 @@ if __name__ == '__main__':
         print("Test image {:d}/{:d}: {:s}".format(k+1, len(image_list), image_path), end='\r')
         image = imgproc.loadImage(image_path)
 
-        bboxes, polys, score_text = test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, args.cuda, args.poly, refine_net)
+        bboxes, polys, score_text = test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, device, args.poly, refine_net)
 
         # save score text
         filename, file_ext = os.path.splitext(os.path.basename(image_path))
