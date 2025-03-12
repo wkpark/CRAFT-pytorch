@@ -21,9 +21,9 @@ PyTorch implementation for CRAFT text detector that effectively detect text area
 ## Getting started
 ### Install dependencies
 #### Requirements
-- PyTorch>=0.4.1
-- torchvision>=0.2.1
-- opencv-python>=3.4.2
+- PyTorch>=2.1.0
+- torchvision>=0.17.2
+- opencv-python>=4.10.0
 - check requiremtns.txt
 ```
 pip install -r requirements.txt
@@ -54,7 +54,7 @@ The result image and socre maps will be saved to `./result` by default.
 * `--text_threshold`: text confidence threshold
 * `--low_text`: text low-bound score
 * `--link_threshold`: link confidence threshold
-* `--cuda`: use cuda for inference (default:True)
+* `--gpu`: use GPU for inference (default:False)
 * `--canvas_size`: max image size for inference
 * `--mag_ratio`: image magnification ratio
 * `--poly`: enable polygon type result
