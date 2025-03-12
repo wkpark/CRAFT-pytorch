@@ -56,7 +56,7 @@ def resize_aspect_ratio(img, square_size, interpolation, mag_ratio=1):
         target_h32 = target_h + (32 - target_h % 32)
     if target_w % 32 != 0:
         target_w32 = target_w + (32 - target_w % 32)
-    resized = np.zeros((target_h32, target_w32, channel), dtype=np.float32)
+    resized = np.zeros((target_h32, target_w32, channel), dtype=proc.dtype)
     resized[0:target_h, 0:target_w, :] = proc
     target_h, target_w = target_h32, target_w32
 
