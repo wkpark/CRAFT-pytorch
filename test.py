@@ -53,6 +53,7 @@ parser.add_argument('--gpu', default=False, action='store_true', help='Use GPU f
 parser.add_argument('--canvas_size', default=3200, type=int, help='image size for inference')
 parser.add_argument('--mag_ratio', default=1.3, type=float, help='image magnification ratio')
 parser.add_argument('--poly', default=False, action='store_true', help='enable polygon type')
+parser.add_argument('--half', default=False, action='store_true', help='Use float16')
 parser.add_argument('--show_time', default=False, action='store_true', help='show processing time')
 parser.add_argument('--test_folder', default='/data/', type=str, help='folder path to input images')
 parser.add_argument('--refine', default=False, action='store_true', help='enable link refiner')
@@ -86,7 +87,7 @@ if not os.path.isdir(result_folder):
 
 
 def test_net(canvas_size, mag_ratio, net, image, text_threshold, link_threshold, low_text, poly, device, estimate_num_chars=False,
-        refine_net=None, verbose=False, options={}):
+        refine_net=None, verbose=False, half=False, options={}):
 
     t0 = time.time()
 
@@ -103,6 +104,9 @@ def test_net(canvas_size, mag_ratio, net, image, text_threshold, link_threshold,
     x = Variable(x.unsqueeze(0))                # [c, h, w] to [b, c, h, w]
     x = x.to(device)
 
+    if half:
+        x = x.half()
+
     # forward pass
     with torch.no_grad():
         y, feature = net(x)
@@ -110,14 +114,22 @@ def test_net(canvas_size, mag_ratio, net, image, text_threshold, link_threshold,
     del x
 
     # make score and link map
-    score_text = y[0, ..., 0].detach().cpu().numpy()
-    score_link = y[0, ..., 1].detach().cpu().numpy()
+    if half:
+        score_text = y[0, ..., 0].to(torch.float32).detach().cpu().numpy()
+        score_link = y[0, ..., 1].to(torch.float32).detach().cpu().numpy()
+    else:
+        score_text = y[0, ..., 0].detach().cpu().numpy()
+        score_link = y[0, ..., 1].detach().cpu().numpy()
 
     # refine link
     if refine_net is not None:
         with torch.no_grad():
             y_refiner = refine_net(y, feature)
-        score_link = y_refiner[0, ...,0].detach().cpu().numpy()
+
+        if half:
+            score_link = y_refiner[0, ...,0].to(torch.float32).detach().cpu().numpy()
+        else:
+            score_link = y_refiner[0, ...,0].detach().cpu().numpy()
 
     del y, feature
 
@@ -176,6 +188,8 @@ if __name__ == '__main__':
         cudnn.benchmark = False
 
     net.eval()
+    if args.half:
+        net.half()
 
     # LinkRefiner
     refine_net = None
@@ -189,6 +203,9 @@ if __name__ == '__main__':
             refine_net = torch.nn.DataParallel(refine_net)
 
         refine_net.eval()
+        if args.half:
+            refine_net.half()
+
         args.poly = True
 
     t1 = time.time()
@@ -208,7 +225,7 @@ if __name__ == '__main__':
 
         bboxes, polys, score_text = test_net(
             args.canvas_size, args.mag_ratio, net, image, args.text_threshold, args.link_threshold, args.low_text, args.poly, device,
-            refine_net=refine_net, verbose=args.show_time, options=options,
+            refine_net=refine_net, verbose=args.show_time, half=args.half, options=options,
         )
 
         # save score text
