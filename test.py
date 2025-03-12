@@ -180,8 +180,9 @@ if __name__ == '__main__':
     # LinkRefiner
     refine_net = None
     if args.refine:
-        from refinenet import RefineNet
+        from craft.refinenet import RefineNet
         refine_net = RefineNet()
+        refime_net = refine_net.to(device)
         print('Loading weights of refiner from checkpoint (' + args.refiner_model + ')')
         refine_net.load_state_dict(copyStateDict(torch.load(args.refiner_model, map_location=device, weights_only=False)))
         if device != 'cpu':
