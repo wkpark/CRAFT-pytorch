@@ -65,7 +65,6 @@ The result image and socre maps will be saved to `./result` by default.
 
 
 ## Links
-- WebDemo : https://demo.ocr.clova.ai/
 - Repo of recognition : https://github.com/clovaai/deep-text-recognition-benchmark
 
 ## Citation
