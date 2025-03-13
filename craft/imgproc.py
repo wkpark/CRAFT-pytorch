@@ -34,35 +34,33 @@ def denormalizeMeanVariance(in_img, mean=(0.485, 0.456, 0.406), variance=(0.229,
     img = np.clip(img, 0, 255).astype(np.uint8)
     return img
 
-def resize_aspect_ratio(img, square_size, interpolation, mag_ratio=1):
-    height, width, channel = img.shape
+def resize_aspect_ratio(img, square_size=2560, interpolation=cv2.INTER_CUBIC, mag_ratio=1.0, target_size=None, round=True):
+    height, width, _ = img.shape
 
+    max_sz = max(height, width)
     # magnify image size
-    target_size = mag_ratio * max(height, width)
+    if target_size is None:
+        target_size = mag_ratio * max_sz
 
     # set original image size
     if target_size > square_size:
         target_size = square_size
     
-    ratio = target_size / max(height, width)    
+    ratio = target_size / max_sz
 
-    target_h, target_w = int(height * ratio), int(width * ratio)
-    proc = cv2.resize(img, (target_w, target_h), interpolation = interpolation)
+    target_w = int(width * ratio)
 
+    # check rounded width and adjust ratio again
+    if round and target_w % 32 != 0:
+        # round width
+        target_w = target_w + (32 - target_w % 32)
+        ratio = target_w / width
 
-    # make canvas and paste image
-    target_h32, target_w32 = target_h, target_w
-    if target_h % 32 != 0:
-        target_h32 = target_h + (32 - target_h % 32)
-    if target_w % 32 != 0:
-        target_w32 = target_w + (32 - target_w % 32)
-    resized = np.zeros((target_h32, target_w32, channel), dtype=proc.dtype)
-    resized[0:target_h, 0:target_w, :] = proc
-    target_h, target_w = target_h32, target_w32
+    target_h = int(height * ratio)
 
-    size_heatmap = (int(target_w/2), int(target_h/2))
+    resized = cv2.resize(img, (target_w, target_h), interpolation=interpolation)
 
-    return resized, ratio, size_heatmap
+    return resized, ratio
 
 def cvt2HeatmapImg(img):
     img = (np.clip(img, 0, 1) * 255).astype(np.uint8)
