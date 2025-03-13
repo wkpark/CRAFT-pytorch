@@ -7,7 +7,13 @@ MIT License
 import numpy as np
 import cv2
 import math
+import torch
+
 from scipy.ndimage import label
+from torch.autograd import Variable
+
+from .imgproc import normalizeMeanVariance
+
 
 """ auxiliary functions """
 # unwarp corodinates
@@ -248,3 +254,64 @@ def adjustResultCoordinates(polys, ratio_w, ratio_h, ratio_net = 2):
             if polys[k] is not None:
                 polys[k] *= (ratio_w * ratio_net, ratio_h * ratio_net)
     return polys
+
+
+def detect_net(image, net, refine_net=None, device=None, half=False):
+
+    x = None
+    if isinstance(image, np.ndarray):
+        if image.dtype != np.float32:
+            # for normal ndarray images
+            x = normalizeMeanVariance(image)
+    if x is None:
+        x = image.copy()
+
+    # preprocessing
+    x = torch.from_numpy(x).permute(2, 0, 1)    # [h, w, c] to [c, h, w]
+    x = Variable(x.unsqueeze(0))                # [c, h, w] to [b, c, h, w]
+
+    if device:
+        x = x.to(device)
+
+    if half:
+        x = x.half()
+
+    # forward pass
+    with torch.no_grad():
+        y, feature = net(x)
+
+    del x
+
+    # make score and link map
+    if half:
+        score_text = y[0, ..., 0].to(torch.float32).detach().cpu().numpy()
+        score_link = y[0, ..., 1].to(torch.float32).detach().cpu().numpy()
+    else:
+        score_text = y[0, ..., 0].detach().cpu().numpy()
+        score_link = y[0, ..., 1].detach().cpu().numpy()
+
+    # refine link
+    if refine_net is not None:
+        with torch.no_grad():
+            y_refiner = refine_net(y, feature)
+
+        if half:
+            score_link = y_refiner[0, ...,0].to(torch.float32).detach().cpu().numpy()
+        else:
+            score_link = y_refiner[0, ...,0].detach().cpu().numpy()
+
+    del y, feature
+
+    return score_text, score_link
+
+
+def detect_textbox(image, net, refine_net, text_threshold, link_threshold, low_text, poly, device, estimate_num_chars=False,
+        half=False):
+
+    score_text, score_link = detect_net(image, net, refine_net, device=device, half=half)
+
+    # Post-processing
+    boxes, polys, mapper = getDetBoxes(score_text, score_link, text_threshold, link_threshold, low_text, poly,
+        estimate_num_chars=estimate_num_chars)
+
+    return score_text, score_link, boxes, polys

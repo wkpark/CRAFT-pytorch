@@ -12,20 +12,19 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
-from torch.autograd import Variable
 
 from PIL import Image
 
 import cv2
 from skimage import io
 import numpy as np
-import craft.craft_utils as craft_utils
 import craft.imgproc as imgproc
 import craft.file_utils as file_utils
 import json
 import zipfile
 
 from craft import CRAFT
+from craft.craft_utils import getDetBoxes, adjustResultCoordinates, detect_net
 
 from collections import OrderedDict
 def copyStateDict(state_dict):
@@ -95,67 +94,6 @@ def resize_image(image, canvas_size, target_size=None, mag_ratio=1.0):
     return img_resized, target_ratio
 
 
-def detect_net(image, net, refine_net=None, device=None, half=False):
-
-    x = None
-    if isinstance(image, np.ndarray):
-        if image.dtype != np.float32:
-            # for normal ndarray images
-            x = imgproc.normalizeMeanVariance(image)
-    if x is None:
-        x = image.copy()
-
-    # preprocessing
-    x = torch.from_numpy(x).permute(2, 0, 1)    # [h, w, c] to [c, h, w]
-    x = Variable(x.unsqueeze(0))                # [c, h, w] to [b, c, h, w]
-
-    if device:
-        x = x.to(device)
-
-    if half:
-        x = x.half()
-
-    # forward pass
-    with torch.no_grad():
-        y, feature = net(x)
-
-    del x
-
-    # make score and link map
-    if half:
-        score_text = y[0, ..., 0].to(torch.float32).detach().cpu().numpy()
-        score_link = y[0, ..., 1].to(torch.float32).detach().cpu().numpy()
-    else:
-        score_text = y[0, ..., 0].detach().cpu().numpy()
-        score_link = y[0, ..., 1].detach().cpu().numpy()
-
-    # refine link
-    if refine_net is not None:
-        with torch.no_grad():
-            y_refiner = refine_net(y, feature)
-
-        if half:
-            score_link = y_refiner[0, ...,0].to(torch.float32).detach().cpu().numpy()
-        else:
-            score_link = y_refiner[0, ...,0].detach().cpu().numpy()
-
-    del y, feature
-
-    return score_text, score_link
-
-
-def detect_textbox(image, net, refine_net, text_threshold, link_threshold, low_text, poly, device, estimate_num_chars=False,
-        half=False):
-
-    score_text, score_link = detect_net(image, net, refine_net, device=device, half=half)
-
-    # Post-processing
-    boxes, polys, mapper = craft_utils.getDetBoxes(score_text, score_link, text_threshold, link_threshold, low_text, poly,
-        estimate_num_chars=estimate_num_chars)
-
-    return score_text, score_link, boxes, polys
-
-
 def test_net(canvas_size, mag_ratio, net, image, text_threshold, link_threshold, low_text, poly, device, estimate_num_chars=False,
         refine_net=None, verbose=False, half=False):
 
@@ -173,12 +111,12 @@ def test_net(canvas_size, mag_ratio, net, image, text_threshold, link_threshold,
     t1 = time.time()
 
     # Post-processing
-    boxes, polys, mapper = craft_utils.getDetBoxes(score_text, score_link, text_threshold, link_threshold, low_text, poly,
+    boxes, polys, mapper = getDetBoxes(score_text, score_link, text_threshold, link_threshold, low_text, poly,
         estimate_num_chars=estimate_num_chars)
 
     # coordinate adjustment
-    boxes = craft_utils.adjustResultCoordinates(boxes, ratio_w, ratio_h)
-    polys = craft_utils.adjustResultCoordinates(polys, ratio_w, ratio_h)
+    boxes = adjustResultCoordinates(boxes, ratio_w, ratio_h)
+    polys = adjustResultCoordinates(polys, ratio_w, ratio_h)
     for k in range(len(polys)):
         if polys[k] is None: polys[k] = boxes[k]
 
