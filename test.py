@@ -18,6 +18,13 @@ from PIL import Image
 import cv2
 from skimage import io
 import numpy as np
+
+try:
+    import craft_detector as craft
+    sys.modules["craft"] = craft
+except Exception:
+    pass
+
 import craft.imgproc as imgproc
 import craft.file_utils as file_utils
 import json
