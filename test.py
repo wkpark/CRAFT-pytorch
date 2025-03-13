@@ -49,6 +49,7 @@ parser.add_argument('--trained_model', default='weights/craft_mlt_25k.pth', type
 parser.add_argument('--text_threshold', default=0.2, type=float, help='text confidence threshold')
 parser.add_argument('--low_text', default=0.3, type=float, help='text low-bound score')
 parser.add_argument('--link_threshold', default=0.4, type=float, help='link confidence threshold')
+parser.add_argument('--infer', default=False, action='store_true', help='Inference only')
 parser.add_argument('--gpu', default=False, action='store_true', help='Use GPU for inference')
 parser.add_argument('--canvas_size', default=3200, type=int, help='image size for inference')
 parser.add_argument('--mag_ratio', default=1.3, type=float, help='image magnification ratio')
@@ -86,23 +87,30 @@ if not os.path.isdir(result_folder):
     os.mkdir(result_folder)
 
 
-def test_net(canvas_size, mag_ratio, net, image, text_threshold, link_threshold, low_text, poly, device, estimate_num_chars=False,
-        refine_net=None, verbose=False, half=False, options={}):
-
-    t0 = time.time()
-
+def resize_image(image, canvas_size, target_size=None, mag_ratio=1.0):
     # resize
-    img_resized, target_ratio, size_heatmap = imgproc.resize_aspect_ratio(image, canvas_size, interpolation=cv2.INTER_LINEAR,
-        mag_ratio=mag_ratio)
-    ratio_h = ratio_w = 1 / target_ratio
+    img_resized, target_ratio = imgproc.resize_aspect_ratio(image, canvas_size, interpolation=cv2.INTER_CUBIC,
+        mag_ratio=mag_ratio, target_size=target_size)
 
-    img_resized = img_resized.astype(np.float32)
+    return img_resized, target_ratio
+
+
+def detect_net(image, net, refine_net=None, device=None, half=False):
+
+    x = None
+    if isinstance(image, np.ndarray):
+        if image.dtype != np.float32:
+            # for normal ndarray images
+            x = imgproc.normalizeMeanVariance(image)
+    if x is None:
+        x = image.copy()
 
     # preprocessing
-    x = imgproc.normalizeMeanVariance(img_resized)
     x = torch.from_numpy(x).permute(2, 0, 1)    # [h, w, c] to [c, h, w]
     x = Variable(x.unsqueeze(0))                # [c, h, w] to [b, c, h, w]
-    x = x.to(device)
+
+    if device:
+        x = x.to(device)
 
     if half:
         x = x.half()
@@ -133,11 +141,40 @@ def test_net(canvas_size, mag_ratio, net, image, text_threshold, link_threshold,
 
     del y, feature
 
+    return score_text, score_link
+
+
+def detect_textbox(image, net, refine_net, text_threshold, link_threshold, low_text, poly, device, estimate_num_chars=False,
+        half=False):
+
+    score_text, score_link = detect_net(image, net, refine_net, device=device, half=half)
+
+    # Post-processing
+    boxes, polys, mapper = craft_utils.getDetBoxes(score_text, score_link, text_threshold, link_threshold, low_text, poly,
+        estimate_num_chars=estimate_num_chars)
+
+    return score_text, score_link, boxes, polys
+
+
+def test_net(canvas_size, mag_ratio, net, image, text_threshold, link_threshold, low_text, poly, device, estimate_num_chars=False,
+        refine_net=None, verbose=False, half=False):
+
+    t0 = time.time()
+
+    # resize
+    resized, target_ratio = resize_image(image, canvas_size, mag_ratio=mag_ratio)
+    x = imgproc.normalizeMeanVariance(resized)
+
+    ratio_h = ratio_w = 1 / target_ratio
+
+    score_text, score_link = detect_net(x, net, refine_net, device=device, half=half)
+
     t0 = time.time() - t0
     t1 = time.time()
 
     # Post-processing
-    boxes, polys, mapper = craft_utils.getDetBoxes(score_text, score_link, text_threshold, link_threshold, low_text, poly)
+    boxes, polys, mapper = craft_utils.getDetBoxes(score_text, score_link, text_threshold, link_threshold, low_text, poly,
+        estimate_num_chars=estimate_num_chars)
 
     # coordinate adjustment
     boxes = craft_utils.adjustResultCoordinates(boxes, ratio_w, ratio_h)
@@ -147,14 +184,9 @@ def test_net(canvas_size, mag_ratio, net, image, text_threshold, link_threshold,
 
     t1 = time.time() - t1
 
-    # render results (optional)
-    render_img = score_text.copy()
-    render_img = np.hstack((render_img, score_link))
-    ret_score_text = imgproc.cvt2HeatmapImg(render_img)
-
     if verbose : print("\ninfer/postproc time : {:.3f}/{:.3f}".format(t0, t1))
 
-    return boxes, polys, ret_score_text
+    return boxes, polys, score_text, score_link
 
 
 
@@ -190,6 +222,8 @@ if __name__ == '__main__':
     net.eval()
     if args.half:
         net.half()
+    else:
+        net.float()
 
     # LinkRefiner
     refine_net = None
@@ -205,6 +239,8 @@ if __name__ == '__main__':
         refine_net.eval()
         if args.half:
             refine_net.half()
+        else:
+            refine_net.float()
 
         args.poly = True
 
@@ -223,15 +259,28 @@ if __name__ == '__main__':
 
         options["filename"] = filename
 
-        bboxes, polys, score_text = test_net(
-            args.canvas_size, args.mag_ratio, net, image, args.text_threshold, args.link_threshold, args.low_text, args.poly, device,
-            refine_net=refine_net, verbose=args.show_time, half=args.half, options=options,
-        )
+        if args.infer:
+            resized, target_ratio = resize_image(image, args.canvas_size, mag_ratio=args.mag_ratio)
+            x = imgproc.normalizeMeanVariance(resized)
+            score_text, score_link = detect_net(x, net, refine_net=refine_net, device=device, half=args.half)
+        else:
+            bboxes, polys, score_text, score_link = test_net(
+                args.canvas_size, args.mag_ratio, net, image, args.text_threshold, args.link_threshold, args.low_text, args.poly, device,
+                refine_net=refine_net, verbose=args.show_time, half=args.half,
+            )
+
+        # render results (optional)
+        render_img = score_text.copy()
+        render_img = np.hstack((render_img, score_link))
+        ret_score_text = imgproc.cvt2HeatmapImg(render_img)
 
         # save score text
         mask_file = result_folder + "/res_" + filename + '_mask.jpg'
-        cv2.imwrite(mask_file, score_text)
+        cv2.imwrite(mask_file, ret_score_text)
 
-        file_utils.saveResult(image_path, image[:,:,::-1], polys, dirname=result_folder)
+        if not args.infer:
+            file_utils.saveResult(image_path, image[:,:,::-1], polys, dirname=result_folder)
 
+    if args.show_time:
+        print()
     print("elapsed time : {}s".format(time.time() - t))
