@@ -1,0 +1,79 @@
+[project]
+name = "craft-detector"
+version = "0.2.1"
+description = "Python package for Official implementation of Character Region Awareness for Text Detection (CRAFT)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Clova AI Research, NAVER Corp.", email = "youngmin.baek@navercorp.com" },
+]
+license="MIT"
+maintainers = [
+    { name = "Won-Kyu Park", email="wkpark@gmail.com" },
+]
+
+dependencies = [
+    "torch (>=2.1.2)",
+    "torchvision (>=0.17.2)",
+    "opencv-python (>=4.10.0)",
+    "scikit-image (>=0.25.1)",
+    "scipy (>=1.14.0)",
+]
+
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Education",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+keywords = ["machine-learning", "deep-learning", "ml", "pytorch", "text", "text-detection", "craft"]
+
+[urls]
+Homepage = "https://github.com/wkpark/CRAFT-pytorch"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+#requires = ["uv_build>=0.8.19,<0.9.0"]
+#build-backend = "uv_build"
+#requires = ["setuptools>=61.0"]
+#build-backend = "setuptools.build_meta"
+#requires = ["pdm-backend"]
+#build-backend = "pdm.backend"
+
+[tool.uv.build-backend]
+# for uv_build backend
+module-root = "."
+module-name = "craft"
+
+[tool.hatch.build.targets.wheel]
+packages = ["craft"]
+
+[tool.hatch.build.targets.sdist]
+ignore-vcs = true
+only-include = ["craft", "test.py"]
+
+[tool.hatch.build]
+dev-mode-dirs = ["."]
+dev-mode-exact = true
+
+[tool.hatch.build.targets.wheel.sources]
+"craft" = "craft_detector"
+
+[tool.pdm.build]
+package-dir = "."
+module-name = "craft_detector"
+editable-backend = "editables"
+
+[tool.setuptools]
+package-dir = {"craft_detector" = "craft"}
+
+[tool.uv.sources]
+craft-detector = { workspace = true }
