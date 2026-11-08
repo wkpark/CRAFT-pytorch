@@ -1,0 +1,35 @@
+name: Publish to PyPI
+
+# Publishing a GitHub release tagged v<version>, such as v0.2.2 for __version__ = '0.2.2' in
+# craft/__init__.py, uploads that version to PyPI through trusted publishing. PyPI never takes the
+# same version twice, so the tag must name the version the build produced.
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run build
+      - run: pipx run twine check --strict dist/*
+      - name: Check that the tag names the built version
+        run: test -f "dist/craft_detector-${GITHUB_REF_NAME#v}-py3-none-any.whl"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # trusted publishing: PyPI accepts this repository's workflow, no token stored
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

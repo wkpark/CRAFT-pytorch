@@ -9,7 +9,6 @@ resolution-markers = [
 
 [[package]]
 name = "craft-detector"
-version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "opencv-python" },
