@@ -1,6 +1,6 @@
 [project]
 name = "craft-detector"
-version = "0.2.1"
+dynamic = ["version"]  # __version__ in craft/__init__.py, so that a release bumps one place
 description = "Python package for Official implementation of Character Region Awareness for Text Detection (CRAFT)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,7 +35,7 @@ classifiers = [
 ]
 keywords = ["machine-learning", "deep-learning", "ml", "pytorch", "text", "text-detection", "craft"]
 
-[urls]
+[project.urls]
 Homepage = "https://github.com/wkpark/CRAFT-pytorch"
 
 [build-system]
@@ -52,6 +52,9 @@ build-backend = "hatchling.build"
 # for uv_build backend
 module-root = "."
 module-name = "craft"
+
+[tool.hatch.version]
+path = "craft/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["craft"]
