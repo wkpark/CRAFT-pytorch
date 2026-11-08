@@ -36,6 +36,11 @@ def getDetBoxes_core(textmap, linkmap, text_threshold, link_threshold, low_text,
     text_score_comb = np.clip(text_score + link_score, 0, 1)
     nLabels, labels, stats, centroids = cv2.connectedComponentsWithStats(text_score_comb.astype(np.uint8), connectivity=4)
 
+    # Each component is worked on inside its own window (its bounding box and the dilation
+    # margin), which holds all of its pixels, instead of over the whole map once per component.
+    # The boxes, mapper and labels are the same as before.
+    link_area = np.logical_and(link_score==1, text_score==0)
+
     det = []
     mapper = []
     for k in range(1,nLabels):
@@ -43,21 +48,12 @@ def getDetBoxes_core(textmap, linkmap, text_threshold, link_threshold, low_text,
         size = stats[k, cv2.CC_STAT_AREA]
         if size < 10: continue
 
-        # thresholding
-        if np.max(textmap[labels==k]) < text_threshold: continue
-
-        # make segmentation map
-        segmap = np.zeros(textmap.shape, dtype=np.uint8)
-        segmap[labels==k] = 255
-        if estimate_num_chars:
-            _, character_locs = cv2.threshold((textmap - linkmap) * segmap /255., text_threshold, 1, 0)
-            _, n_chars = label(character_locs)
-            mapper.append(n_chars)
-        else:
-            mapper.append(k)
-        segmap[np.logical_and(link_score==1, text_score==0)] = 0   # remove link area
         x, y = stats[k, cv2.CC_STAT_LEFT], stats[k, cv2.CC_STAT_TOP]
         w, h = stats[k, cv2.CC_STAT_WIDTH], stats[k, cv2.CC_STAT_HEIGHT]
+
+        # thresholding
+        if np.max(textmap[y:y+h, x:x+w][labels[y:y+h, x:x+w]==k]) < text_threshold: continue
+
         niter = int(math.sqrt(size * min(w, h) / (w * h)) * 2)
         sx, ex, sy, ey = x - niter, x + w + niter + 1, y - niter, y + h + niter + 1
         # boundary check
@@ -65,11 +61,24 @@ def getDetBoxes_core(textmap, linkmap, text_threshold, link_threshold, low_text,
         if sy < 0 : sy = 0
         if ex >= img_w: ex = img_w
         if ey >= img_h: ey = img_h
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(1 + niter, 1 + niter))
-        segmap[sy:ey, sx:ex] = cv2.dilate(segmap[sy:ey, sx:ex], kernel)
 
-        # make box
-        np_contours = np.roll(np.array(np.where(segmap!=0)),1,axis=0).transpose().reshape(-1,2)
+        # make segmentation map, in window coordinates
+        segmap = np.zeros((ey - sy, ex - sx), dtype=np.uint8)
+        segmap[labels[sy:ey, sx:ex]==k] = 255
+        if estimate_num_chars:
+            textlink = textmap[sy:ey, sx:ex] - linkmap[sy:ey, sx:ex]
+            _, character_locs = cv2.threshold(textlink * segmap /255., text_threshold, 1, 0)
+            _, n_chars = label(character_locs)
+            mapper.append(n_chars)
+        else:
+            mapper.append(k)
+        segmap[link_area[sy:ey, sx:ex]] = 0   # remove link area
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(1 + niter, 1 + niter))
+        segmap = cv2.dilate(segmap, kernel)
+
+        # make box, back in map coordinates
+        ys, xs = np.where(segmap!=0)
+        np_contours = np.stack([xs + sx, ys + sy], axis=1)
         rectangle = cv2.minAreaRect(np_contours)
         box = cv2.boxPoints(rectangle)
 
